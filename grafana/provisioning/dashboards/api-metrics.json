@@ -1,0 +1,64 @@
+{
+  "uid": "api-metrics-dashboard",
+  "title": "API Metrics",
+  "schemaVersion": 38,
+  "version": 1,
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Nodos Activos",
+      "id": 1,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "-- Grafana will resolve default datasource --"
+      },
+      "targets": [
+        {
+          "expr": "noderegistry_active_nodes_total",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Tasa de Peticiones",
+      "id": 2,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "-- Grafana will resolve default datasource --"
+      },
+      "targets": [
+        {
+          "expr": "rate(noderegistry_requests_total[1m])",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "req/s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 6
+      }
+    }
+  ],
+  "refresh": "10s",
+  "timezone": "browser"
+}
