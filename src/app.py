@@ -1,22 +1,56 @@
+import time
 from datetime import datetime, timezone
-from fastapi import Depends, FastAPI, HTTPException, Response
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from starlette.middleware.base import BaseHTTPMiddleware
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 from src.database import Base, engine, get_db
 from src.models import Node
 from src.schemas import NodeCreate, NodeResponse, NodeUpdate
-from prometheus_client import make_asgi_app, Counter
+from prometheus_client import make_asgi_app, Counter, Gauge, Histogram
 
 Base.metadata.create_all(bind=engine)
 app = FastAPI()
 
-# Mount the Prometheus ASGI app on the /metrics route
+# Metrics
+registry_requests_total = Counter(
+    "noderegistry_requests_total",
+    "Total requests received by the node registry API",
+    ["method", "path", "status_code"],
+)
+registry_request_duration_seconds = Histogram(
+    "noderegistry_request_duration_seconds",
+    "Request processing time in seconds",
+    ["method", "path"],
+)
+registry_active_nodes = Gauge(
+    "noderegistry_active_nodes_total",
+    "Number of nodes currently in active state",
+)
+
+class MetricsMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        start_time = time.time()
+        response = await call_next(request)
+        process_time = time.time() - start_time
+        
+        request_path = request.url.path
+        if request_path != "/metrics":
+            registry_requests_total.labels(
+                method=request.method,
+                path=request_path,
+                status_code=str(response.status_code),
+            ).inc()
+            registry_request_duration_seconds.labels(
+                method=request.method,
+                path=request_path,
+            ).observe(process_time)
+        return response
+
+app.add_middleware(MetricsMiddleware)
+
 metrics_app = make_asgi_app()
 app.mount("/metrics", metrics_app)
-
-# Create a custom metric
-# This counter will record how many nodes are successfully created
-NODES_CREATED_COUNTER = Counter("api_nodes_created_total", "Total number of successfully registered nodes")
 
 @app.get("/health")
 def health(db: Session = Depends(get_db)):
@@ -26,6 +60,9 @@ def health(db: Session = Depends(get_db)):
     except Exception:
         db_status = "disconnected"
     count = db.query(Node).filter(Node.status == "active").count()
+
+    registry_active_nodes.set(count)
+
     return {"status": "ok", "db": db_status, "nodes_count": count}
 
 @app.post("/api/nodes", response_model=NodeResponse, status_code=201)
@@ -38,8 +75,8 @@ def register_node(node: NodeCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(db_node)
 
-    # Increment the Prometheus counter every time a node is registered
-    NODES_CREATED_COUNTER.inc()
+    active_count = db.query(Node).filter(Node.status == "active").count()
+    registry_active_nodes.set(active_count)
 
     return db_node
 
@@ -76,4 +113,8 @@ def delete_node(name: str, db: Session = Depends(get_db)):
     node.status = "inactive"
     node.updated_at = datetime.now(timezone.utc)
     db.commit()
+
+    active_count = db.query(Node).filter(Node.status == "active").count()
+    registry_active_nodes.set(active_count)
+
     return Response(status_code=204)
