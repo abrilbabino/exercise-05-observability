@@ -5,9 +5,18 @@ from sqlalchemy.orm import Session
 from src.database import Base, engine, get_db
 from src.models import Node
 from src.schemas import NodeCreate, NodeResponse, NodeUpdate
+from prometheus_client import make_asgi_app, Counter
 
 Base.metadata.create_all(bind=engine)
 app = FastAPI()
+
+# Mount the Prometheus ASGI app on the /metrics route
+metrics_app = make_asgi_app()
+app.mount("/metrics", metrics_app)
+
+# Create a custom metric
+# This counter will record how many nodes are successfully created
+NODES_CREATED_COUNTER = Counter("api_nodes_created_total", "Total number of successfully registered nodes")
 
 @app.get("/health")
 def health(db: Session = Depends(get_db)):
@@ -28,6 +37,10 @@ def register_node(node: NodeCreate, db: Session = Depends(get_db)):
     db.add(db_node)
     db.commit()
     db.refresh(db_node)
+
+    # Increment the Prometheus counter every time a node is registered
+    NODES_CREATED_COUNTER.inc()
+
     return db_node
 
 @app.get("/api/nodes", response_model=list[NodeResponse])
